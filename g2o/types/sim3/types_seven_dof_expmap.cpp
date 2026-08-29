@@ -60,26 +60,34 @@ EdgeSim3::EdgeSim3()
 
 bool VertexSim3Expmap::read(std::istream& is) {
   Vector7 cam2world;
-  bool state = true;
-  state &= internal::readVector(is, cam2world);
-  state &= internal::readVector(is, _focal_length1);
-  state &= internal::readVector(is, _principle_point1);
+  if (!internal::readVector(is, cam2world)) return false;
+  if (!internal::readVector(is, _focal_length1)) return false;
+  if (!internal::readVector(is, _principle_point1)) return false;
   setEstimate(Sim3(cam2world).inverse());
-  return state;
+
+  // Optional trailing fields added later: focal_length2, principle_point2
+  // and the fix_scale flag. Records written before they existed end here
+  // and keep the values they were constructed with.
+  return internal::readOptional(is, _focal_length2[0], _focal_length2[1],
+                                _principle_point2[0], _principle_point2[1],
+                                _fix_scale);
 }
 
 bool VertexSim3Expmap::write(std::ostream& os) const {
   Sim3 cam2world(estimate().inverse());
   Vector7 lv = cam2world.log();
-  internal::writeVector(os, lv);
-  internal::writeVector(os, _focal_length1);
-  internal::writeVector(os, _principle_point1);
-  return os.good();
+  if (!internal::writeVector(os, lv)) return false;
+  if (!internal::writeVector(os, _focal_length1)) return false;
+  if (!internal::writeVector(os, _principle_point1)) return false;
+  if (!internal::writeVector(os, _focal_length2)) return false;
+  if (!internal::writeVector(os, _principle_point2)) return false;
+  os << _fix_scale << " ";
+  return !os.fail();
 }
 
 bool EdgeSim3::read(std::istream& is) {
   Vector7 v7;
-  internal::readVector(is, v7);
+  if (!internal::readVector(is, v7)) return false;
   Sim3 cam2world(v7);
   setMeasurement(cam2world.inverse());
   return readInformationMatrix(is);
@@ -87,7 +95,7 @@ bool EdgeSim3::read(std::istream& is) {
 
 bool EdgeSim3::write(std::ostream& os) const {
   Sim3 cam2world(measurement().inverse());
-  internal::writeVector(os, cam2world.log());
+  if (!internal::writeVector(os, cam2world.log())) return false;
   return writeInformationMatrix(os);
 }
 
@@ -147,12 +155,12 @@ EdgeSim3ProjectXYZ::EdgeSim3ProjectXYZ()
     : BaseBinaryEdge<2, Vector2, VertexPointXYZ, VertexSim3Expmap>() {}
 
 bool EdgeSim3ProjectXYZ::read(std::istream& is) {
-  internal::readVector(is, _measurement);
+  if (!internal::readVector(is, _measurement)) return false;
   return readInformationMatrix(is);
 }
 
 bool EdgeSim3ProjectXYZ::write(std::ostream& os) const {
-  internal::writeVector(os, _measurement);
+  if (!internal::writeVector(os, _measurement)) return false;
   return writeInformationMatrix(os);
 }
 
@@ -160,12 +168,12 @@ EdgeInverseSim3ProjectXYZ::EdgeInverseSim3ProjectXYZ()
     : BaseBinaryEdge<2, Vector2, VertexPointXYZ, VertexSim3Expmap>() {}
 
 bool EdgeInverseSim3ProjectXYZ::read(std::istream& is) {
-  internal::readVector(is, _measurement);
+  if (!internal::readVector(is, _measurement)) return false;
   return readInformationMatrix(is);
 }
 
 bool EdgeInverseSim3ProjectXYZ::write(std::ostream& os) const {
-  internal::writeVector(os, _measurement);
+  if (!internal::writeVector(os, _measurement)) return false;
   return writeInformationMatrix(os);
 }
 
