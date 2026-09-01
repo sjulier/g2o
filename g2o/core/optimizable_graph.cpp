@@ -43,6 +43,7 @@
 #include "optimization_algorithm_property.h"
 #include "ownership.h"
 #include "robust_kernel.h"
+#include "robust_kernel_factory.h"
 
 namespace g2o {
 
@@ -356,6 +357,7 @@ bool OptimizableGraph::load(istream& is) {
 
   HyperGraph::DataContainer* previousDataContainer = 0;
   Data* previousData = 0;
+  Edge* previousEdge = 0;
 
   int lineNumber = 0;
   while (1) {
@@ -384,6 +386,42 @@ bool OptimizableGraph::load(istream& is) {
       continue;
     }
 
+    // the level of an edge, applies to the edge read last
+    if (token == "LEVEL") {
+      int edgeLevel;
+      if (!(currentLine >> edgeLevel)) {
+        G2O_ERROR("Unable to read the level at line {}", lineNumber);
+      } else if (!previousEdge) {
+        G2O_ERROR("LEVEL at line {} is not preceded by an edge", lineNumber);
+      } else {
+        previousEdge->setLevel(edgeLevel);
+      }
+      continue;
+    }
+
+    // the robust kernel of an edge, applies to the edge read last
+    if (token == "ROBUSTKERNEL") {
+      string kernelTag;
+      double delta;
+      if (!(currentLine >> kernelTag >> delta)) {
+        G2O_ERROR("Unable to read the robust kernel at line {}", lineNumber);
+      } else if (!previousEdge) {
+        G2O_ERROR("ROBUSTKERNEL at line {} is not preceded by an edge",
+                  lineNumber);
+      } else {
+        RobustKernel* kernel =
+            RobustKernelFactory::instance()->construct(kernelTag);
+        if (!kernel) {
+          G2O_ERROR("Unknown robust kernel {} at line {}", kernelTag,
+                    lineNumber);
+        } else {
+          kernel->setDelta(delta);
+          previousEdge->setRobustKernel(kernel);
+        }
+      }
+      continue;
+    }
+
     // do the mapping to an internal type if it matches
     if (_renamedTypesLookup.size() > 0) {
       map<string, string>::const_iterator foundIt =
@@ -405,6 +443,7 @@ bool OptimizableGraph::load(istream& is) {
     HyperGraph::HyperGraphElement* pelement =
         factory->construct(token, elemParamBitset);
     if (pelement) {  // not a parameter or otherwise unknown tag
+      previousEdge = 0;
       assert(pelement->elementType() == HyperGraph::HGET_PARAMETER &&
              "Should be a param");
       Parameter* p = static_cast<Parameter*>(pelement);
@@ -428,6 +467,7 @@ bool OptimizableGraph::load(istream& is) {
         factory->construct(token, elemBitset);
     if (dynamic_cast<Vertex*>(element)) {  // it's a vertex type
       previousData = 0;
+      previousEdge = 0;
       Vertex* v = static_cast<Vertex*>(element);
       int id;
       currentLine >> id;
@@ -489,6 +529,7 @@ bool OptimizableGraph::load(istream& is) {
       }
 
       previousDataContainer = e;
+      previousEdge = e;
     } else if (dynamic_cast<Data*>(
                    element)) {  // reading in the data packet for the vertex
       Data* d = static_cast<Data*>(element);
@@ -761,6 +802,32 @@ bool OptimizableGraph::saveParameter(std::ostream& os, Parameter* p) const {
   return os.good();
 }
 
+bool OptimizableGraph::saveEdgeLevel(std::ostream& os,
+                                     const OptimizableGraph::Edge* e) const {
+  // the default level is not written to stay compatible with files which do
+  // not carry the information
+  if (e->level() != 0) {
+    os << "LEVEL " << e->level() << endl;
+  }
+  return os.good();
+}
+
+bool OptimizableGraph::saveEdgeRobustKernel(
+    std::ostream& os, const OptimizableGraph::Edge* e) const {
+  const RobustKernel* kernel = e->robustKernel();
+  if (!kernel) return os.good();
+  const string& tag = RobustKernelFactory::instance()->tag(kernel);
+  if (tag.size() == 0) {
+    G2O_WARN(
+        "Robust kernel of type {} is not registered and hence not saved for "
+        "edge {}",
+        typeid(*kernel).name(), e->internalId());
+    return os.good();
+  }
+  os << "ROBUSTKERNEL " << tag << " " << kernel->delta() << endl;
+  return os.good();
+}
+
 bool OptimizableGraph::saveEdge(std::ostream& os,
                                 OptimizableGraph::Edge* e) const {
   Factory* factory = Factory::instance();
@@ -774,6 +841,8 @@ bool OptimizableGraph::saveEdge(std::ostream& os,
     }
     e->write(os);
     os << endl;
+    saveEdgeLevel(os, e);
+    saveEdgeRobustKernel(os, e);
     saveUserData(os, e->userData());
     return os.good();
   }

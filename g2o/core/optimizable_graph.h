@@ -733,6 +733,13 @@ struct G2O_CORE_API OptimizableGraph : public HyperGraph {
   // helper functions to save an individual edge
   bool saveEdge(std::ostream& os, Edge* e) const;
 
+  // helper function to save the level of an edge, omitted if it is the default
+  bool saveEdgeLevel(std::ostream& os, const Edge* e) const;
+
+  // helper function to save the robust kernel of an edge, omitted if the edge
+  // does not have one
+  bool saveEdgeRobustKernel(std::ostream& os, const Edge* e) const;
+
   // helper functions to save the data packets
   bool saveUserData(std::ostream& os, HyperGraph::Data* v) const;
 

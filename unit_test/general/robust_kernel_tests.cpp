@@ -32,6 +32,22 @@
 
 using namespace testing;
 
+namespace {
+/**
+ * A kernel which is only known to this test. Registering and unregistering
+ * this one leaves the kernels shipped with g2o available to the other tests
+ * running in the same binary.
+ */
+class RobustKernelForTesting : public g2o::RobustKernel {
+ public:
+  void robustify(double squaredError, g2o::Vector3& rho) const override {
+    rho[0] = squaredError;
+    rho[1] = 1.;
+    rho[2] = 0.;
+  }
+};
+}  // namespace
+
 TEST(General, RobustKernelFactory) {
   g2o::RobustKernelFactory* factory = g2o::RobustKernelFactory::instance();
 
@@ -46,11 +62,26 @@ TEST(General, RobustKernelFactory) {
   for (const auto& s : kernels) {
     g2o::RobustKernel* kernel = factory->construct(s);
     ASSERT_THAT(kernel, NotNull());
+    // the tag of a kernel is the name it was registered under
+    ASSERT_THAT(factory->tag(kernel), Eq(s));
     delete kernel;
   }
 
-  // remove one kernel
-  std::string kernelToRemove = kernels[kernels.size() / 2];
+  // add a kernel of our own
+  const std::string kernelToRemove = "KernelForTesting";
+  factory->registerRobustKernel(
+      kernelToRemove,
+      g2o::AbstractRobustKernelCreator::Ptr(
+          new g2o::RobustKernelCreator<RobustKernelForTesting>));
+  ASSERT_THAT(factory->creator(kernelToRemove), NotNull());
+  // check that we added exactly that desired kernel
+  std::vector<std::string> kernelsAfterRegistration;
+  factory->fillKnownKernels(kernelsAfterRegistration);
+  ASSERT_THAT(kernelsAfterRegistration, Contains(kernelToRemove));
+  ASSERT_THAT(kernels, IsSubsetOf(kernelsAfterRegistration));
+  ASSERT_THAT(kernelsAfterRegistration, SizeIs(kernels.size() + 1));
+
+  // remove the kernel again
   factory->unregisterType(kernelToRemove);
   // check that we cannot create it
   ASSERT_THAT(factory->creator(kernelToRemove), IsNull());
@@ -59,10 +90,11 @@ TEST(General, RobustKernelFactory) {
   std::vector<std::string> kernelsAfterRemoval;
   factory->fillKnownKernels(kernelsAfterRemoval);
   ASSERT_THAT(kernelsAfterRemoval, Not(Contains(kernelToRemove)));
-  ASSERT_THAT(kernelsAfterRemoval, IsSubsetOf(kernels));
-  ASSERT_THAT(kernelsAfterRemoval, SizeIs(kernels.size() - 1));
-  kernelsAfterRemoval.push_back(kernelToRemove);
   ASSERT_THAT(kernelsAfterRemoval, UnorderedElementsAreArray(kernels));
+
+  // an unregistered kernel does not have a tag
+  RobustKernelForTesting unregisteredKernel;
+  ASSERT_THAT(factory->tag(&unregisteredKernel), IsEmpty());
 }
 
 /**

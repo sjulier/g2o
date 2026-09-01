@@ -31,6 +31,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 #include "g2o/stuff/misc.h"  // ForceLinker for the macros
@@ -49,6 +50,11 @@ class G2O_CORE_API AbstractRobustKernelCreator {
    * create a hyper graph element. Has to implemented in derived class.
    */
   virtual RobustKernel* construct() = 0;
+  /**
+   * name of the class to be created. Has to implemented in derived class.
+   */
+  virtual const std::string& name() const = 0;
+
   virtual ~AbstractRobustKernelCreator() {}
   using Ptr = std::shared_ptr<AbstractRobustKernelCreator>;
 };
@@ -59,7 +65,12 @@ class G2O_CORE_API AbstractRobustKernelCreator {
 template <typename T>
 class RobustKernelCreator : public AbstractRobustKernelCreator {
  public:
+  RobustKernelCreator() : _name(typeid(T).name()) {}
   RobustKernel* construct() { return new T; }
+  virtual const std::string& name() const { return _name; }
+
+ protected:
+  std::string _name;
 };
 
 /**
@@ -98,15 +109,23 @@ class G2O_CORE_API RobustKernelFactory {
   AbstractRobustKernelCreator* creator(const std::string& tag) const;
 
   /**
+   * return the tag under which a robust kernel is registered, an empty string
+   * if the kernel is not known to the factory
+   */
+  const std::string& tag(const RobustKernel* k) const;
+
+  /**
    * get a list of all known robust kernels
    */
   void fillKnownKernels(std::vector<std::string>& types) const;
 
  protected:
   typedef std::map<std::string, AbstractRobustKernelCreator::Ptr> CreatorMap;
+  typedef std::map<std::string, std::string> TagLookup;
   RobustKernelFactory() = default;
 
-  CreatorMap _creator;  ///< look-up map for the existing creators
+  CreatorMap _creator;   ///< look-up map for the existing creators
+  TagLookup _tagLookup;  ///< reverse look-up, class name to tag
 
  private:
   static std::unique_ptr<RobustKernelFactory> factoryInstance;
