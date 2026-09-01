@@ -51,13 +51,13 @@ using namespace std;
 
 OptimizableGraph::Vertex::Vertex()
     : HyperGraph::Vertex(),
-      _graph(0),
-      _userData(0),
+      _graph(nullptr),
+      _userData(nullptr),
       _hessianIndex(-1),
       _fixed(false),
       _marginalized(false),
       _colInHessian(-1),
-      _cacheContainer(0) {}
+      _cacheContainer(nullptr) {}
 
 CacheContainer* OptimizableGraph::Vertex::cacheContainer() {
   if (!_cacheContainer) _cacheContainer = new CacheContainer(this);
@@ -121,7 +121,7 @@ const OptimizableGraph* OptimizableGraph::Edge::graph() const {
 bool OptimizableGraph::Edge::setParameterId(int argNum, int paramId) {
   if ((int)_parameters.size() <= argNum) return false;
   if (argNum < 0) return false;
-  *_parameters[argNum] = 0;
+  *_parameters[argNum] = nullptr;
   _parameterIds[argNum] = paramId;
   return true;
 }
@@ -355,9 +355,9 @@ bool OptimizableGraph::load(istream& is) {
   HyperGraph::GraphElemBitset elemParamBitset;
   elemParamBitset[HyperGraph::HGET_PARAMETER] = 1;
 
-  HyperGraph::DataContainer* previousDataContainer = 0;
-  Data* previousData = 0;
-  Edge* previousEdge = 0;
+  HyperGraph::DataContainer* previousDataContainer = nullptr;
+  Data* previousData = nullptr;
+  Edge* previousEdge = nullptr;
 
   int lineNumber = 0;
   while (1) {
@@ -443,7 +443,7 @@ bool OptimizableGraph::load(istream& is) {
     HyperGraph::HyperGraphElement* pelement =
         factory->construct(token, elemParamBitset);
     if (pelement) {  // not a parameter or otherwise unknown tag
-      previousEdge = 0;
+      previousEdge = nullptr;
       assert(pelement->elementType() == HyperGraph::HGET_PARAMETER &&
              "Should be a param");
       Parameter* p = static_cast<Parameter*>(pelement);
@@ -466,8 +466,8 @@ bool OptimizableGraph::load(istream& is) {
     HyperGraph::HyperGraphElement* element =
         factory->construct(token, elemBitset);
     if (dynamic_cast<Vertex*>(element)) {  // it's a vertex type
-      previousData = 0;
-      previousEdge = 0;
+      previousData = nullptr;
+      previousEdge = nullptr;
       Vertex* v = static_cast<Vertex*>(element);
       int id;
       currentLine >> id;
@@ -484,7 +484,7 @@ bool OptimizableGraph::load(istream& is) {
         previousDataContainer = v;
       }
     } else if (dynamic_cast<Edge*>(element)) {
-      previousData = 0;
+      previousData = nullptr;
       Edge* e = static_cast<Edge*>(element);
       int numV = e->vertices().size();
 
@@ -537,7 +537,7 @@ bool OptimizableGraph::load(istream& is) {
       if (!r) {
         G2O_ERROR("Error reading data {} at line {}", token, lineNumber);
         delete d;
-        previousData = 0;
+        previousData = nullptr;
       } else if (previousData) {
         previousData->setNext(d);
         d->setDataContainer(previousData->dataContainer());
@@ -546,11 +546,11 @@ bool OptimizableGraph::load(istream& is) {
         previousDataContainer->setUserData(d);
         d->setDataContainer(previousDataContainer);
         previousData = d;
-        previousDataContainer = 0;
+        previousDataContainer = nullptr;
       } else {
         G2O_ERROR("got data element, but no data container available");
         delete d;
-        previousData = 0;
+        previousData = nullptr;
       }
     }
   }  // while read line
