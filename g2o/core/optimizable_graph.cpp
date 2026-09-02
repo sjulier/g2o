@@ -424,13 +424,13 @@ bool OptimizableGraph::load(istream& is) {
     }
 
     // the robust kernel of an edge, applies to the edge read last
-    if (token == "ROBUSTKERNEL") {
+    if (token == "ROBUST_KERNEL") {
       string kernelTag;
       double delta;
       if (!(currentLine >> kernelTag >> delta)) {
         G2O_ERROR("Unable to read the robust kernel at line {}", lineNumber);
       } else if (!previousEdge) {
-        G2O_ERROR("ROBUSTKERNEL at line {} is not preceded by an edge",
+        G2O_ERROR("ROBUST_KERNEL at line {} is not preceded by an edge",
                   lineNumber);
       } else {
         RobustKernel* kernel =
@@ -854,7 +854,7 @@ bool OptimizableGraph::saveEdgeRobustKernel(
         typeid(*kernel).name(), e->internalId());
     return os.good();
   }
-  os << "ROBUSTKERNEL " << tag << " " << kernel->delta() << endl;
+  os << "ROBUST_KERNEL " << tag << " " << kernel->delta() << endl;
   return os.good();
 }
 

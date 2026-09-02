@@ -111,7 +111,7 @@ TEST_F(IoGraphAttributes, DefaultsAreNotSaved) {
   // files which can be read by earlier versions of g2o stay unchanged
   EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZED"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), IsEmpty());
-  EXPECT_THAT(parseLines(graphData.str(), "ROBUSTKERNEL"), IsEmpty());
+  EXPECT_THAT(parseLines(graphData.str(), "ROBUST_KERNEL"), IsEmpty());
 }
 
 TEST_F(IoGraphAttributes, SaveMarginalized) {
@@ -160,7 +160,7 @@ TEST_F(IoGraphAttributes, SaveRobustKernel) {
   std::stringstream graphData;
   ASSERT_TRUE(optimizer->save(graphData));
 
-  EXPECT_THAT(parseLines(graphData.str(), "ROBUSTKERNEL"),
+  EXPECT_THAT(parseLines(graphData.str(), "ROBUST_KERNEL"),
               ElementsAre("Huber 1.5"));
 }
 
@@ -244,7 +244,7 @@ TEST_F(IoGraphAttributes, LoadUnknownRobustKernel) {
   optimizer->clear();
 
   std::stringstream graphData(std::string(kLegacyGraph) +
-                              "ROBUSTKERNEL NoSuchKernel 1.5\n");
+                              "ROBUST_KERNEL NoSuchKernel 1.5\n");
   ASSERT_TRUE(optimizer->load(graphData));
 
   ASSERT_THAT(optimizer->edges(), SizeIs(1));
@@ -255,7 +255,7 @@ TEST_F(IoGraphAttributes, LoadRecordsWithoutAnEdge) {
   optimizer->clear();
 
   // the records are ignored, the remainder of the file is still read
-  std::stringstream graphData("LEVEL 2\nROBUSTKERNEL Huber 1.5\n" +
+  std::stringstream graphData("LEVEL 2\nROBUST_KERNEL Huber 1.5\n" +
                               std::string(kLegacyGraph));
   ASSERT_TRUE(optimizer->load(graphData));
 
