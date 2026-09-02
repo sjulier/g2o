@@ -176,6 +176,13 @@ TEST_F(IoGraphAttributes, SaveLevel) {
   EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), IsEmpty());
 }
 
+TEST_F(IoGraphAttributes, AllLevelsIsReserved) {
+  // an ordinary edge is never on the reserved level. Ne() binds its argument
+  // by reference, so this also pins that the constant can be used without an
+  // out-of-line definition
+  EXPECT_THAT(edge(0, 1)->level(), Ne(g2o::OptimizableGraph::AllLevels));
+}
+
 TEST_F(IoGraphAttributes, SaveAllLevels) {
   edge(1, 2)->setLevel(1);
   edge(2, 0)->setLevel(2);

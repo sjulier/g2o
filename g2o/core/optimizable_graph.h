@@ -29,6 +29,7 @@
 
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <typeinfo>
 
@@ -671,10 +672,14 @@ struct G2O_CORE_API OptimizableGraph : public HyperGraph {
   /**
    * Passed as the level to save() / saveSubset() to write the edges of every
    * level instead of just one. The level each edge belongs to is preserved,
-   * so the graph reloads unchanged. Edges may not use this value as a level
-   * of their own.
+   * so the graph reloads unchanged.
+   *
+   * The value is the one an edge is least likely to want for itself; an edge
+   * on this level cannot be saved on its own. Note it never reaches a file:
+   * saving every level leaves the file default at zero and records the level
+   * of each edge individually.
    */
-  static const int AllLevels = -1;
+  static constexpr int AllLevels = (std::numeric_limits<int>::min)();
 
   /**
    * save the graph to a stream. Again uses the Factory system.
