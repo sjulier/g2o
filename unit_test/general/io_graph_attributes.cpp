@@ -1,4 +1,6 @@
-// Tests the serialization of the level and the robust kernel of an edge.
+// Tests the serialization of the properties which are not part of the record
+// of a vertex or an edge: the marginalized state of a vertex, and the level
+// and the robust kernel of an edge.
 
 #include <memory>
 #include <sstream>
@@ -50,10 +52,11 @@ std::vector<std::string> parseLines(const std::string& graphData,
 }  // namespace
 
 /**
- * Fixture with a small graph of three vertices connected by three edges, all
- * of them on the default level and without a robust kernel.
+ * Fixture with a small graph of three vertices connected by three edges. None
+ * of the vertices is marginalized, all the edges are on the default level and
+ * without a robust kernel.
  */
-class IoEdgeAttributes : public Test {
+class IoGraphAttributes : public Test {
  protected:
   void SetUp() override {
     optimizer.reset(g2o::internal::createOptimizerForTests());
@@ -85,6 +88,11 @@ class IoEdgeAttributes : public Test {
     return nullptr;
   }
 
+  //! the vertex of the graph with the given ID
+  g2o::OptimizableGraph::Vertex* vertex(int id) const {
+    return static_cast<g2o::OptimizableGraph::Vertex*>(optimizer->vertex(id));
+  }
+
   //! the tag under which the robust kernel of an edge is registered
   static std::string kernelTag(const g2o::OptimizableGraph::Edge* e) {
     const g2o::RobustKernel* kernel = e->robustKernel();
@@ -96,16 +104,55 @@ class IoEdgeAttributes : public Test {
   int numVertices = 3;
 };
 
-TEST_F(IoEdgeAttributes, DefaultsAreNotSaved) {
+TEST_F(IoGraphAttributes, DefaultsAreNotSaved) {
   std::stringstream graphData;
   ASSERT_TRUE(optimizer->save(graphData));
 
   // files which can be read by earlier versions of g2o stay unchanged
+  EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZE"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "ROBUSTKERNEL"), IsEmpty());
 }
 
-TEST_F(IoEdgeAttributes, SaveRobustKernel) {
+TEST_F(IoGraphAttributes, SaveMarginalized) {
+  vertex(1)->setMarginalized(true);
+  vertex(2)->setMarginalized(true);
+
+  std::stringstream graphData;
+  ASSERT_TRUE(optimizer->save(graphData));
+
+  EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZE"),
+              ElementsAre("1", "2"));
+}
+
+TEST_F(IoGraphAttributes, LoadMarginalized) {
+  vertex(1)->setMarginalized(true);
+
+  std::stringstream graphData;
+  ASSERT_TRUE(optimizer->save(graphData));
+  optimizer->clear();
+  ASSERT_TRUE(optimizer->load(graphData));
+  ASSERT_THAT(optimizer->vertices(), SizeIs(numVertices));
+
+  EXPECT_THAT(vertex(1)->marginalized(), IsTrue());
+  EXPECT_THAT(vertex(0)->marginalized(), IsFalse());
+  EXPECT_THAT(vertex(2)->marginalized(), IsFalse());
+  // marginalizing a vertex must not have disturbed the fixed state
+  EXPECT_THAT(vertex(0)->fixed(), IsTrue());
+  EXPECT_THAT(vertex(1)->fixed(), IsFalse());
+}
+
+TEST_F(IoGraphAttributes, LoadMarginalizedOfSeveralVerticesOnOneLine) {
+  optimizer->clear();
+
+  std::stringstream graphData(std::string(kLegacyGraph) + "MARGINALIZE 0 1\n");
+  ASSERT_TRUE(optimizer->load(graphData));
+
+  EXPECT_THAT(vertex(0)->marginalized(), IsTrue());
+  EXPECT_THAT(vertex(1)->marginalized(), IsTrue());
+}
+
+TEST_F(IoGraphAttributes, SaveRobustKernel) {
   g2o::RobustKernelHuber* kernel = new g2o::RobustKernelHuber;
   kernel->setDelta(1.5);
   edge(0, 1)->setRobustKernel(kernel);
@@ -117,7 +164,7 @@ TEST_F(IoEdgeAttributes, SaveRobustKernel) {
               ElementsAre("Huber 1.5"));
 }
 
-TEST_F(IoEdgeAttributes, SaveLevel) {
+TEST_F(IoGraphAttributes, SaveLevel) {
   edge(0, 1)->setLevel(2);
 
   std::stringstream graphData;
@@ -126,7 +173,7 @@ TEST_F(IoEdgeAttributes, SaveLevel) {
   EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), ElementsAre("2"));
 }
 
-TEST_F(IoEdgeAttributes, LoadRobustKernel) {
+TEST_F(IoGraphAttributes, LoadRobustKernel) {
   g2o::RobustKernelHuber* huber = new g2o::RobustKernelHuber;
   huber->setDelta(1.5);
   edge(0, 1)->setRobustKernel(huber);
@@ -149,7 +196,7 @@ TEST_F(IoEdgeAttributes, LoadRobustKernel) {
   EXPECT_THAT(edge(2, 0)->robustKernel(), IsNull());
 }
 
-TEST_F(IoEdgeAttributes, LoadLevel) {
+TEST_F(IoGraphAttributes, LoadLevel) {
   edge(1, 2)->setLevel(3);
 
   std::stringstream graphData;
@@ -161,7 +208,7 @@ TEST_F(IoEdgeAttributes, LoadLevel) {
   EXPECT_THAT(edge(1, 2)->level(), Eq(3));
 }
 
-TEST_F(IoEdgeAttributes, LoadLevelAndRobustKernelTogether) {
+TEST_F(IoGraphAttributes, LoadLevelAndRobustKernelTogether) {
   g2o::RobustKernelDCS* kernel = new g2o::RobustKernelDCS;
   kernel->setDelta(2.5);
   edge(0, 1)->setLevel(1);
@@ -178,20 +225,22 @@ TEST_F(IoEdgeAttributes, LoadLevelAndRobustKernelTogether) {
   EXPECT_THAT(edge(0, 1)->robustKernel()->delta(), DoubleEq(2.5));
 }
 
-TEST_F(IoEdgeAttributes, LoadLegacyGraph) {
+TEST_F(IoGraphAttributes, LoadLegacyGraph) {
   optimizer->clear();
 
   std::stringstream graphData(kLegacyGraph);
   ASSERT_TRUE(optimizer->load(graphData));
 
   ASSERT_THAT(optimizer->edges(), SizeIs(1));
-  // an edge of a file without the records defaults to level zero and to not
-  // having a robust kernel
+  // without the records a vertex is not marginalized and an edge is on level
+  // zero and does not have a robust kernel
+  EXPECT_THAT(vertex(0)->marginalized(), IsFalse());
+  EXPECT_THAT(vertex(1)->marginalized(), IsFalse());
   EXPECT_THAT(edge(0, 1)->level(), Eq(0));
   EXPECT_THAT(edge(0, 1)->robustKernel(), IsNull());
 }
 
-TEST_F(IoEdgeAttributes, LoadUnknownRobustKernel) {
+TEST_F(IoGraphAttributes, LoadUnknownRobustKernel) {
   optimizer->clear();
 
   std::stringstream graphData(std::string(kLegacyGraph) +
@@ -202,7 +251,7 @@ TEST_F(IoEdgeAttributes, LoadUnknownRobustKernel) {
   EXPECT_THAT(edge(0, 1)->robustKernel(), IsNull());
 }
 
-TEST_F(IoEdgeAttributes, LoadRecordsWithoutAnEdge) {
+TEST_F(IoGraphAttributes, LoadRecordsWithoutAnEdge) {
   optimizer->clear();
 
   // the records are ignored, the remainder of the file is still read

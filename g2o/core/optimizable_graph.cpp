@@ -342,6 +342,32 @@ void OptimizableGraph::forEachVertex(
   }
 }
 
+namespace {
+/**
+ * Apply one of the commands of the file format to all the vertices whose IDs
+ * are listed on the current line, e.g. FIX 1 2 3.
+ */
+void applyToVerticesOnLine(OptimizableGraph& graph, stringstream& currentLine,
+                           const string& command,
+                           void (OptimizableGraph::Vertex::*setter)(bool)) {
+  int id;
+  while (currentLine >> id) {
+    OptimizableGraph::Vertex* v =
+        static_cast<OptimizableGraph::Vertex*>(graph.vertex(id));
+    if (!v) {
+      G2O_WARN(
+          "Unable to apply {} to vertex with id {}. Not found in the graph.",
+          command, id);
+      continue;
+    }
+#ifndef NDEBUG
+    G2O_DEBUG("Applying {} to vertex {}", command, v->id());
+#endif
+    (v->*setter)(true);
+  }
+}
+}  // namespace
+
 bool OptimizableGraph::load(istream& is) {
   set<string> warnedUnknownTypes;
   stringstream currentLine;
@@ -369,20 +395,14 @@ bool OptimizableGraph::load(istream& is) {
 
     // handle commands encoded in the file
     if (token == "FIX") {
-      int id;
-      while (currentLine >> id) {
-        OptimizableGraph::Vertex* v =
-            static_cast<OptimizableGraph::Vertex*>(vertex(id));
-        if (v) {
-#ifndef NDEBUG
-          G2O_DEBUG("Fixing vertex {}", v->id());
-#endif
-          v->setFixed(true);
-        } else {
-          G2O_WARN("Unable to fix vertex with id {}. Not found in the graph.",
-                   id);
-        }
-      }
+      applyToVerticesOnLine(*this, currentLine, token,
+                            &OptimizableGraph::Vertex::setFixed);
+      continue;
+    }
+
+    if (token == "MARGINALIZE") {
+      applyToVerticesOnLine(*this, currentLine, token,
+                            &OptimizableGraph::Vertex::setMarginalized);
       continue;
     }
 
@@ -785,6 +805,11 @@ bool OptimizableGraph::saveVertex(std::ostream& os,
     saveUserData(os, v->userData());
     if (v->fixed()) {
       os << "FIX " << v->id() << endl;
+    }
+    // the default is not written to stay compatible with files which do not
+    // carry the information
+    if (v->marginalized()) {
+      os << "MARGINALIZE " << v->id() << endl;
     }
     return os.good();
   }
