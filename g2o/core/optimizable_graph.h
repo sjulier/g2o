@@ -29,6 +29,7 @@
 
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <typeinfo>
 
@@ -668,7 +669,26 @@ struct G2O_CORE_API OptimizableGraph : public HyperGraph {
   //! vertices and edges.
   virtual bool load(std::istream& is);
   bool load(const char* filename);
-  //! save the graph to a stream. Again uses the Factory system.
+  /**
+   * Passed as the level to save() / saveSubset() to write the edges of every
+   * level instead of just one. The level each edge belongs to is preserved,
+   * so the graph reloads unchanged.
+   *
+   * The value is the one an edge is least likely to want for itself; an edge
+   * on this level cannot be saved on its own. Note it never reaches a file:
+   * saving every level leaves the file default at zero and records the level
+   * of each edge individually.
+   */
+  static constexpr int AllLevels = (std::numeric_limits<int>::min)();
+
+  /**
+   * save the graph to a stream. Again uses the Factory system.
+   *
+   * Only the edges on @p level are written, along with the vertices they
+   * connect; pass AllLevels for the whole graph. A level other than the
+   * default becomes a DEFAULT_LEVEL record, so the edges of a single-level
+   * file need no level of their own.
+   */
   virtual bool save(std::ostream& os, int level = 0) const;
   //! function provided for convenience, see save() above
   bool save(const char* filename, int level = 0) const;
@@ -731,7 +751,19 @@ struct G2O_CORE_API OptimizableGraph : public HyperGraph {
   bool saveParameter(std::ostream& os, Parameter* v) const;
 
   // helper functions to save an individual edge
-  bool saveEdge(std::ostream& os, Edge* e) const;
+  bool saveEdge(std::ostream& os, Edge* e, int defaultLevel = 0) const;
+
+  // helper function to save the level which the edges of the file are on
+  // unless they say otherwise, omitted if it is zero
+  bool saveDefaultLevel(std::ostream& os, int defaultLevel) const;
+
+  // helper function to save the level of an edge, omitted if the edge is on
+  // the level the file already defaults to
+  bool saveEdgeLevel(std::ostream& os, const Edge* e, int defaultLevel) const;
+
+  // helper function to save the robust kernel of an edge, omitted if the edge
+  // does not have one
+  bool saveEdgeRobustKernel(std::ostream& os, const Edge* e) const;
 
   // helper functions to save the data packets
   bool saveUserData(std::ostream& os, HyperGraph::Data* v) const;

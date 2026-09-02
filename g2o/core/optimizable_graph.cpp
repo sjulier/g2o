@@ -43,6 +43,7 @@
 #include "optimization_algorithm_property.h"
 #include "ownership.h"
 #include "robust_kernel.h"
+#include "robust_kernel_factory.h"
 
 namespace g2o {
 
@@ -50,13 +51,13 @@ using namespace std;
 
 OptimizableGraph::Vertex::Vertex()
     : HyperGraph::Vertex(),
-      _graph(0),
-      _userData(0),
+      _graph(nullptr),
+      _userData(nullptr),
       _hessianIndex(-1),
       _fixed(false),
       _marginalized(false),
       _colInHessian(-1),
-      _cacheContainer(0) {}
+      _cacheContainer(nullptr) {}
 
 CacheContainer* OptimizableGraph::Vertex::cacheContainer() {
   if (!_cacheContainer) _cacheContainer = new CacheContainer(this);
@@ -120,7 +121,7 @@ const OptimizableGraph* OptimizableGraph::Edge::graph() const {
 bool OptimizableGraph::Edge::setParameterId(int argNum, int paramId) {
   if ((int)_parameters.size() <= argNum) return false;
   if (argNum < 0) return false;
-  *_parameters[argNum] = 0;
+  *_parameters[argNum] = nullptr;
   _parameterIds[argNum] = paramId;
   return true;
 }
@@ -341,6 +342,53 @@ void OptimizableGraph::forEachVertex(
   }
 }
 
+namespace {
+/**
+ * Set a flag on all the vertices whose IDs are listed on the current line,
+ * e.g. FIX 1 2 3. FIX and MARGINALIZED share this form, but not their meaning:
+ * a fixed vertex is left out of the linear system altogether, whereas a
+ * marginalized one is still estimated and only moves to the second block of
+ * the ordering, so that it is eliminated by the Schur complement and recovered
+ * by back-substitution.
+ */
+/**
+ * Whether an edge belongs in a file saved for @p level, where AllLevels lets
+ * every edge through.
+ */
+bool edgeIsOnLevel(const OptimizableGraph::Edge* e, int level) {
+  return level == OptimizableGraph::AllLevels || e->level() == level;
+}
+
+/**
+ * The level the edges of a file saved for @p level are on unless they say
+ * otherwise. Saving every level keeps the zero default, since the edges then
+ * carry whichever level they are on individually.
+ */
+int fileDefaultLevel(int level) {
+  return level == OptimizableGraph::AllLevels ? 0 : level;
+}
+
+void setFlagOnVerticesOnLine(OptimizableGraph& graph, stringstream& currentLine,
+                             const string& command,
+                             void (OptimizableGraph::Vertex::*setter)(bool)) {
+  int id;
+  while (currentLine >> id) {
+    OptimizableGraph::Vertex* v =
+        static_cast<OptimizableGraph::Vertex*>(graph.vertex(id));
+    if (!v) {
+      G2O_WARN(
+          "Unable to apply {} to vertex with id {}. Not found in the graph.",
+          command, id);
+      continue;
+    }
+#ifndef NDEBUG
+    G2O_DEBUG("Applying {} to vertex {}", command, v->id());
+#endif
+    (v->*setter)(true);
+  }
+}
+}  // namespace
+
 bool OptimizableGraph::load(istream& is) {
   set<string> warnedUnknownTypes;
   stringstream currentLine;
@@ -354,8 +402,10 @@ bool OptimizableGraph::load(istream& is) {
   HyperGraph::GraphElemBitset elemParamBitset;
   elemParamBitset[HyperGraph::HGET_PARAMETER] = 1;
 
-  HyperGraph::DataContainer* previousDataContainer = 0;
-  Data* previousData = 0;
+  HyperGraph::DataContainer* previousDataContainer = nullptr;
+  Data* previousData = nullptr;
+  Edge* previousEdge = nullptr;
+  int defaultLevel = 0;
 
   int lineNumber = 0;
   while (1) {
@@ -367,18 +417,60 @@ bool OptimizableGraph::load(istream& is) {
 
     // handle commands encoded in the file
     if (token == "FIX") {
-      int id;
-      while (currentLine >> id) {
-        OptimizableGraph::Vertex* v =
-            static_cast<OptimizableGraph::Vertex*>(vertex(id));
-        if (v) {
-#ifndef NDEBUG
-          G2O_DEBUG("Fixing vertex {}", v->id());
-#endif
-          v->setFixed(true);
+      setFlagOnVerticesOnLine(*this, currentLine, token,
+                              &OptimizableGraph::Vertex::setFixed);
+      continue;
+    }
+
+    if (token == "MARGINALIZED") {
+      setFlagOnVerticesOnLine(*this, currentLine, token,
+                              &OptimizableGraph::Vertex::setMarginalized);
+      continue;
+    }
+
+    // the level the edges which follow are on unless they say otherwise
+    if (token == "DEFAULT_LEVEL") {
+      int fileLevel;
+      if (!(currentLine >> fileLevel)) {
+        G2O_ERROR("Unable to read the default level at line {}", lineNumber);
+      } else {
+        defaultLevel = fileLevel;
+      }
+      continue;
+    }
+
+    // the level of an edge, applies to the edge read last and overrides the
+    // default level of the file
+    if (token == "LEVEL") {
+      int edgeLevel;
+      if (!(currentLine >> edgeLevel)) {
+        G2O_ERROR("Unable to read the level at line {}", lineNumber);
+      } else if (!previousEdge) {
+        G2O_ERROR("LEVEL at line {} is not preceded by an edge", lineNumber);
+      } else {
+        previousEdge->setLevel(edgeLevel);
+      }
+      continue;
+    }
+
+    // the robust kernel of an edge, applies to the edge read last
+    if (token == "ROBUST_KERNEL") {
+      string kernelTag;
+      double delta;
+      if (!(currentLine >> kernelTag >> delta)) {
+        G2O_ERROR("Unable to read the robust kernel at line {}", lineNumber);
+      } else if (!previousEdge) {
+        G2O_ERROR("ROBUST_KERNEL at line {} is not preceded by an edge",
+                  lineNumber);
+      } else {
+        RobustKernel* kernel =
+            RobustKernelFactory::instance()->construct(kernelTag);
+        if (!kernel) {
+          G2O_ERROR("Unknown robust kernel {} at line {}", kernelTag,
+                    lineNumber);
         } else {
-          G2O_WARN("Unable to fix vertex with id {}. Not found in the graph.",
-                   id);
+          kernel->setDelta(delta);
+          previousEdge->setRobustKernel(kernel);
         }
       }
       continue;
@@ -405,6 +497,7 @@ bool OptimizableGraph::load(istream& is) {
     HyperGraph::HyperGraphElement* pelement =
         factory->construct(token, elemParamBitset);
     if (pelement) {  // not a parameter or otherwise unknown tag
+      previousEdge = nullptr;
       assert(pelement->elementType() == HyperGraph::HGET_PARAMETER &&
              "Should be a param");
       Parameter* p = static_cast<Parameter*>(pelement);
@@ -427,7 +520,8 @@ bool OptimizableGraph::load(istream& is) {
     HyperGraph::HyperGraphElement* element =
         factory->construct(token, elemBitset);
     if (dynamic_cast<Vertex*>(element)) {  // it's a vertex type
-      previousData = 0;
+      previousData = nullptr;
+      previousEdge = nullptr;
       Vertex* v = static_cast<Vertex*>(element);
       int id;
       currentLine >> id;
@@ -444,7 +538,7 @@ bool OptimizableGraph::load(istream& is) {
         previousDataContainer = v;
       }
     } else if (dynamic_cast<Edge*>(element)) {
-      previousData = 0;
+      previousData = nullptr;
       Edge* e = static_cast<Edge*>(element);
       int numV = e->vertices().size();
 
@@ -488,7 +582,10 @@ bool OptimizableGraph::load(istream& is) {
         }
       }
 
+      if (e) e->setLevel(defaultLevel);
+
       previousDataContainer = e;
+      previousEdge = e;
     } else if (dynamic_cast<Data*>(
                    element)) {  // reading in the data packet for the vertex
       Data* d = static_cast<Data*>(element);
@@ -496,7 +593,7 @@ bool OptimizableGraph::load(istream& is) {
       if (!r) {
         G2O_ERROR("Error reading data {} at line {}", token, lineNumber);
         delete d;
-        previousData = 0;
+        previousData = nullptr;
       } else if (previousData) {
         previousData->setNext(d);
         d->setDataContainer(previousData->dataContainer());
@@ -505,11 +602,11 @@ bool OptimizableGraph::load(istream& is) {
         previousDataContainer->setUserData(d);
         d->setDataContainer(previousDataContainer);
         previousData = d;
-        previousDataContainer = 0;
+        previousDataContainer = nullptr;
       } else {
         G2O_ERROR("got data element, but no data container available");
         delete d;
-        previousData = 0;
+        previousData = nullptr;
       }
     }
   }  // while read line
@@ -537,13 +634,15 @@ bool OptimizableGraph::save(const char* filename, int level) const {
 }
 
 bool OptimizableGraph::save(ostream& os, int level) const {
+  const int defaultLevel = fileDefaultLevel(level);
+  if (!saveDefaultLevel(os, defaultLevel)) return false;
   // write the parameters to the top of the file
   if (!_parameters.write(os)) return false;
   set<Vertex*, VertexIDCompare> verticesToSave;  // set sorted by ID
   for (HyperGraph::EdgeSet::const_iterator it = edges().begin();
        it != edges().end(); ++it) {
     OptimizableGraph::Edge* e = static_cast<OptimizableGraph::Edge*>(*it);
-    if (e->level() == level) {
+    if (edgeIsOnLevel(e, level)) {
       for (auto it = e->vertices().begin(); it != e->vertices().end(); ++it) {
         if (*it)
           verticesToSave.insert(static_cast<OptimizableGraph::Vertex*>(*it));
@@ -558,16 +657,18 @@ bool OptimizableGraph::save(ostream& os, int level) const {
                [level](const HyperGraph::Edge* ee) {
                  const OptimizableGraph::Edge* e =
                      dynamic_cast<const OptimizableGraph::Edge*>(ee);
-                 return (e->level() == level);
+                 return edgeIsOnLevel(e, level);
                });
   sort(edgesToSave.begin(), edgesToSave.end(), EdgeIDCompare());
-  for (auto e : edgesToSave) saveEdge(os, static_cast<Edge*>(e));
+  for (auto e : edgesToSave) saveEdge(os, static_cast<Edge*>(e), defaultLevel);
 
   return os.good();
 }
 
 bool OptimizableGraph::saveSubset(ostream& os, HyperGraph::VertexSet& vset,
                                   int level) {
+  const int defaultLevel = fileDefaultLevel(level);
+  if (!saveDefaultLevel(os, defaultLevel)) return false;
   if (!_parameters.write(os)) return false;
 
   for (auto v : vset) saveVertex(os, static_cast<Vertex*>(v));
@@ -575,7 +676,7 @@ bool OptimizableGraph::saveSubset(ostream& os, HyperGraph::VertexSet& vset,
   for (HyperGraph::EdgeSet::const_iterator it = edges().begin();
        it != edges().end(); ++it) {
     OptimizableGraph::Edge* e = dynamic_cast<OptimizableGraph::Edge*>(*it);
-    if (e->level() != level) continue;
+    if (!edgeIsOnLevel(e, level)) continue;
 
     bool verticesInEdge = true;
     for (vector<HyperGraph::Vertex*>::const_iterator it = e->vertices().begin();
@@ -587,7 +688,7 @@ bool OptimizableGraph::saveSubset(ostream& os, HyperGraph::VertexSet& vset,
     }
     if (!verticesInEdge) continue;
 
-    saveEdge(os, e);
+    saveEdge(os, e, defaultLevel);
   }
 
   return os.good();
@@ -745,6 +846,12 @@ bool OptimizableGraph::saveVertex(std::ostream& os,
     if (v->fixed()) {
       os << "FIX " << v->id() << endl;
     }
+    // whether the vertex is eliminated by the Schur complement rather than
+    // solved for directly. The default is not written to stay compatible with
+    // files which do not carry the information.
+    if (v->marginalized()) {
+      os << "MARGINALIZED " << v->id() << endl;
+    }
     return os.good();
   }
   return false;
@@ -761,8 +868,45 @@ bool OptimizableGraph::saveParameter(std::ostream& os, Parameter* p) const {
   return os.good();
 }
 
-bool OptimizableGraph::saveEdge(std::ostream& os,
-                                OptimizableGraph::Edge* e) const {
+bool OptimizableGraph::saveDefaultLevel(std::ostream& os,
+                                        int defaultLevel) const {
+  // zero is not written to stay compatible with files which do not carry the
+  // information
+  if (defaultLevel != 0) {
+    os << "DEFAULT_LEVEL " << defaultLevel << endl;
+  }
+  return os.good();
+}
+
+bool OptimizableGraph::saveEdgeLevel(std::ostream& os,
+                                     const OptimizableGraph::Edge* e,
+                                     int defaultLevel) const {
+  // an edge on the level the file already defaults to needs no record of its
+  // own, which is every edge of a single-level file
+  if (e->level() != defaultLevel) {
+    os << "LEVEL " << e->level() << endl;
+  }
+  return os.good();
+}
+
+bool OptimizableGraph::saveEdgeRobustKernel(
+    std::ostream& os, const OptimizableGraph::Edge* e) const {
+  const RobustKernel* kernel = e->robustKernel();
+  if (!kernel) return os.good();
+  const string& tag = RobustKernelFactory::instance()->tag(kernel);
+  if (tag.size() == 0) {
+    G2O_WARN(
+        "Robust kernel of type {} is not registered and hence not saved for "
+        "edge {}",
+        typeid(*kernel).name(), e->internalId());
+    return os.good();
+  }
+  os << "ROBUST_KERNEL " << tag << " " << kernel->delta() << endl;
+  return os.good();
+}
+
+bool OptimizableGraph::saveEdge(std::ostream& os, OptimizableGraph::Edge* e,
+                                int defaultLevel) const {
   Factory* factory = Factory::instance();
   string tag = factory->tag(e);
   if (tag.size() > 0) {
@@ -774,6 +918,8 @@ bool OptimizableGraph::saveEdge(std::ostream& os,
     }
     e->write(os);
     os << endl;
+    saveEdgeLevel(os, e, defaultLevel);
+    saveEdgeRobustKernel(os, e);
     saveUserData(os, e->userData());
     return os.good();
   }

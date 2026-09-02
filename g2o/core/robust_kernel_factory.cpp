@@ -27,8 +27,10 @@
 #include "robust_kernel_factory.h"
 
 #include <cassert>
+#include <typeinfo>
 
 #include "g2o/stuff/logger.h"
+#include "robust_kernel.h"
 
 using namespace std;
 
@@ -52,13 +54,26 @@ void RobustKernelFactory::registerRobustKernel(
              tag);
     assert(0);
   }
+  TagLookup::const_iterator tagIt = _tagLookup.find(c->name());
+  if (tagIt != _tagLookup.end()) {
+    G2O_WARN(
+        "RobustKernelFactory WARNING: Registering same class for two tags {}",
+        c->name());
+    assert(0);
+  }
 
   _creator[tag] = c;
+  _tagLookup[c->name()] = tag;
 }
 
 void RobustKernelFactory::unregisterType(const std::string& tag) {
   CreatorMap::iterator tagPosition = _creator.find(tag);
   if (tagPosition != _creator.end()) {
+    TagLookup::iterator classPosition =
+        _tagLookup.find(tagPosition->second->name());
+    if (classPosition != _tagLookup.end()) {
+      _tagLookup.erase(classPosition);
+    }
     _creator.erase(tagPosition);
   }
 }
@@ -78,6 +93,13 @@ AbstractRobustKernelCreator* RobustKernelFactory::creator(
     return foundIt->second.get();
   }
   return nullptr;
+}
+
+const std::string& RobustKernelFactory::tag(const RobustKernel* k) const {
+  static std::string emptyStr("");
+  TagLookup::const_iterator foundIt = _tagLookup.find(typeid(*k).name());
+  if (foundIt != _tagLookup.end()) return foundIt->second;
+  return emptyStr;
 }
 
 void RobustKernelFactory::fillKnownKernels(
