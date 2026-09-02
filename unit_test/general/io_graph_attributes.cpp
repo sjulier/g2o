@@ -109,7 +109,7 @@ TEST_F(IoGraphAttributes, DefaultsAreNotSaved) {
   ASSERT_TRUE(optimizer->save(graphData));
 
   // files which can be read by earlier versions of g2o stay unchanged
-  EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZE"), IsEmpty());
+  EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZED"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "ROBUSTKERNEL"), IsEmpty());
 }
@@ -121,7 +121,7 @@ TEST_F(IoGraphAttributes, SaveMarginalized) {
   std::stringstream graphData;
   ASSERT_TRUE(optimizer->save(graphData));
 
-  EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZE"),
+  EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZED"),
               ElementsAre("1", "2"));
 }
 
@@ -145,7 +145,7 @@ TEST_F(IoGraphAttributes, LoadMarginalized) {
 TEST_F(IoGraphAttributes, LoadMarginalizedOfSeveralVerticesOnOneLine) {
   optimizer->clear();
 
-  std::stringstream graphData(std::string(kLegacyGraph) + "MARGINALIZE 0 1\n");
+  std::stringstream graphData(std::string(kLegacyGraph) + "MARGINALIZED 0 1\n");
   ASSERT_TRUE(optimizer->load(graphData));
 
   EXPECT_THAT(vertex(0)->marginalized(), IsTrue());

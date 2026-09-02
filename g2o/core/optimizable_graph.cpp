@@ -344,12 +344,16 @@ void OptimizableGraph::forEachVertex(
 
 namespace {
 /**
- * Apply one of the commands of the file format to all the vertices whose IDs
- * are listed on the current line, e.g. FIX 1 2 3.
+ * Set a flag on all the vertices whose IDs are listed on the current line,
+ * e.g. FIX 1 2 3. FIX and MARGINALIZED share this form, but not their meaning:
+ * a fixed vertex is left out of the linear system altogether, whereas a
+ * marginalized one is still estimated and only moves to the second block of
+ * the ordering, so that it is eliminated by the Schur complement and recovered
+ * by back-substitution.
  */
-void applyToVerticesOnLine(OptimizableGraph& graph, stringstream& currentLine,
-                           const string& command,
-                           void (OptimizableGraph::Vertex::*setter)(bool)) {
+void setFlagOnVerticesOnLine(OptimizableGraph& graph, stringstream& currentLine,
+                             const string& command,
+                             void (OptimizableGraph::Vertex::*setter)(bool)) {
   int id;
   while (currentLine >> id) {
     OptimizableGraph::Vertex* v =
@@ -395,14 +399,14 @@ bool OptimizableGraph::load(istream& is) {
 
     // handle commands encoded in the file
     if (token == "FIX") {
-      applyToVerticesOnLine(*this, currentLine, token,
-                            &OptimizableGraph::Vertex::setFixed);
+      setFlagOnVerticesOnLine(*this, currentLine, token,
+                              &OptimizableGraph::Vertex::setFixed);
       continue;
     }
 
-    if (token == "MARGINALIZE") {
-      applyToVerticesOnLine(*this, currentLine, token,
-                            &OptimizableGraph::Vertex::setMarginalized);
+    if (token == "MARGINALIZED") {
+      setFlagOnVerticesOnLine(*this, currentLine, token,
+                              &OptimizableGraph::Vertex::setMarginalized);
       continue;
     }
 
@@ -806,10 +810,11 @@ bool OptimizableGraph::saveVertex(std::ostream& os,
     if (v->fixed()) {
       os << "FIX " << v->id() << endl;
     }
-    // the default is not written to stay compatible with files which do not
-    // carry the information
+    // whether the vertex is eliminated by the Schur complement rather than
+    // solved for directly. The default is not written to stay compatible with
+    // files which do not carry the information.
     if (v->marginalized()) {
-      os << "MARGINALIZE " << v->id() << endl;
+      os << "MARGINALIZED " << v->id() << endl;
     }
     return os.good();
   }
