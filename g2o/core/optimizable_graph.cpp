@@ -351,6 +351,23 @@ namespace {
  * the ordering, so that it is eliminated by the Schur complement and recovered
  * by back-substitution.
  */
+/**
+ * Whether an edge belongs in a file saved for @p level, where AllLevels lets
+ * every edge through.
+ */
+bool edgeIsOnLevel(const OptimizableGraph::Edge* e, int level) {
+  return level == OptimizableGraph::AllLevels || e->level() == level;
+}
+
+/**
+ * The level the edges of a file saved for @p level are on unless they say
+ * otherwise. Saving every level keeps the zero default, since the edges then
+ * carry whichever level they are on individually.
+ */
+int fileDefaultLevel(int level) {
+  return level == OptimizableGraph::AllLevels ? 0 : level;
+}
+
 void setFlagOnVerticesOnLine(OptimizableGraph& graph, stringstream& currentLine,
                              const string& command,
                              void (OptimizableGraph::Vertex::*setter)(bool)) {
@@ -388,6 +405,7 @@ bool OptimizableGraph::load(istream& is) {
   HyperGraph::DataContainer* previousDataContainer = nullptr;
   Data* previousData = nullptr;
   Edge* previousEdge = nullptr;
+  int defaultLevel = 0;
 
   int lineNumber = 0;
   while (1) {
@@ -410,7 +428,19 @@ bool OptimizableGraph::load(istream& is) {
       continue;
     }
 
-    // the level of an edge, applies to the edge read last
+    // the level the edges which follow are on unless they say otherwise
+    if (token == "DEFAULT_LEVEL") {
+      int fileLevel;
+      if (!(currentLine >> fileLevel)) {
+        G2O_ERROR("Unable to read the default level at line {}", lineNumber);
+      } else {
+        defaultLevel = fileLevel;
+      }
+      continue;
+    }
+
+    // the level of an edge, applies to the edge read last and overrides the
+    // default level of the file
     if (token == "LEVEL") {
       int edgeLevel;
       if (!(currentLine >> edgeLevel)) {
@@ -552,6 +582,8 @@ bool OptimizableGraph::load(istream& is) {
         }
       }
 
+      if (e) e->setLevel(defaultLevel);
+
       previousDataContainer = e;
       previousEdge = e;
     } else if (dynamic_cast<Data*>(
@@ -602,13 +634,15 @@ bool OptimizableGraph::save(const char* filename, int level) const {
 }
 
 bool OptimizableGraph::save(ostream& os, int level) const {
+  const int defaultLevel = fileDefaultLevel(level);
+  if (!saveDefaultLevel(os, defaultLevel)) return false;
   // write the parameters to the top of the file
   if (!_parameters.write(os)) return false;
   set<Vertex*, VertexIDCompare> verticesToSave;  // set sorted by ID
   for (HyperGraph::EdgeSet::const_iterator it = edges().begin();
        it != edges().end(); ++it) {
     OptimizableGraph::Edge* e = static_cast<OptimizableGraph::Edge*>(*it);
-    if (e->level() == level) {
+    if (edgeIsOnLevel(e, level)) {
       for (auto it = e->vertices().begin(); it != e->vertices().end(); ++it) {
         if (*it)
           verticesToSave.insert(static_cast<OptimizableGraph::Vertex*>(*it));
@@ -623,16 +657,18 @@ bool OptimizableGraph::save(ostream& os, int level) const {
                [level](const HyperGraph::Edge* ee) {
                  const OptimizableGraph::Edge* e =
                      dynamic_cast<const OptimizableGraph::Edge*>(ee);
-                 return (e->level() == level);
+                 return edgeIsOnLevel(e, level);
                });
   sort(edgesToSave.begin(), edgesToSave.end(), EdgeIDCompare());
-  for (auto e : edgesToSave) saveEdge(os, static_cast<Edge*>(e));
+  for (auto e : edgesToSave) saveEdge(os, static_cast<Edge*>(e), defaultLevel);
 
   return os.good();
 }
 
 bool OptimizableGraph::saveSubset(ostream& os, HyperGraph::VertexSet& vset,
                                   int level) {
+  const int defaultLevel = fileDefaultLevel(level);
+  if (!saveDefaultLevel(os, defaultLevel)) return false;
   if (!_parameters.write(os)) return false;
 
   for (auto v : vset) saveVertex(os, static_cast<Vertex*>(v));
@@ -640,7 +676,7 @@ bool OptimizableGraph::saveSubset(ostream& os, HyperGraph::VertexSet& vset,
   for (HyperGraph::EdgeSet::const_iterator it = edges().begin();
        it != edges().end(); ++it) {
     OptimizableGraph::Edge* e = dynamic_cast<OptimizableGraph::Edge*>(*it);
-    if (e->level() != level) continue;
+    if (!edgeIsOnLevel(e, level)) continue;
 
     bool verticesInEdge = true;
     for (vector<HyperGraph::Vertex*>::const_iterator it = e->vertices().begin();
@@ -652,7 +688,7 @@ bool OptimizableGraph::saveSubset(ostream& os, HyperGraph::VertexSet& vset,
     }
     if (!verticesInEdge) continue;
 
-    saveEdge(os, e);
+    saveEdge(os, e, defaultLevel);
   }
 
   return os.good();
@@ -832,11 +868,22 @@ bool OptimizableGraph::saveParameter(std::ostream& os, Parameter* p) const {
   return os.good();
 }
 
+bool OptimizableGraph::saveDefaultLevel(std::ostream& os,
+                                        int defaultLevel) const {
+  // zero is not written to stay compatible with files which do not carry the
+  // information
+  if (defaultLevel != 0) {
+    os << "DEFAULT_LEVEL " << defaultLevel << endl;
+  }
+  return os.good();
+}
+
 bool OptimizableGraph::saveEdgeLevel(std::ostream& os,
-                                     const OptimizableGraph::Edge* e) const {
-  // the default level is not written to stay compatible with files which do
-  // not carry the information
-  if (e->level() != 0) {
+                                     const OptimizableGraph::Edge* e,
+                                     int defaultLevel) const {
+  // an edge on the level the file already defaults to needs no record of its
+  // own, which is every edge of a single-level file
+  if (e->level() != defaultLevel) {
     os << "LEVEL " << e->level() << endl;
   }
   return os.good();
@@ -858,8 +905,8 @@ bool OptimizableGraph::saveEdgeRobustKernel(
   return os.good();
 }
 
-bool OptimizableGraph::saveEdge(std::ostream& os,
-                                OptimizableGraph::Edge* e) const {
+bool OptimizableGraph::saveEdge(std::ostream& os, OptimizableGraph::Edge* e,
+                                int defaultLevel) const {
   Factory* factory = Factory::instance();
   string tag = factory->tag(e);
   if (tag.size() > 0) {
@@ -871,7 +918,7 @@ bool OptimizableGraph::saveEdge(std::ostream& os,
     }
     e->write(os);
     os << endl;
-    saveEdgeLevel(os, e);
+    saveEdgeLevel(os, e, defaultLevel);
     saveEdgeRobustKernel(os, e);
     saveUserData(os, e->userData());
     return os.good();

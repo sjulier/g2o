@@ -110,6 +110,7 @@ TEST_F(IoGraphAttributes, DefaultsAreNotSaved) {
 
   // files which can be read by earlier versions of g2o stay unchanged
   EXPECT_THAT(parseLines(graphData.str(), "MARGINALIZED"), IsEmpty());
+  EXPECT_THAT(parseLines(graphData.str(), "DEFAULT_LEVEL"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), IsEmpty());
   EXPECT_THAT(parseLines(graphData.str(), "ROBUST_KERNEL"), IsEmpty());
 }
@@ -170,7 +171,76 @@ TEST_F(IoGraphAttributes, SaveLevel) {
   std::stringstream graphData;
   ASSERT_TRUE(optimizer->save(graphData, 2));
 
-  EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), ElementsAre("2"));
+  // the level of a single-level file is stated once, not on every edge
+  EXPECT_THAT(parseLines(graphData.str(), "DEFAULT_LEVEL"), ElementsAre("2"));
+  EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), IsEmpty());
+}
+
+TEST_F(IoGraphAttributes, SaveAllLevels) {
+  edge(1, 2)->setLevel(1);
+  edge(2, 0)->setLevel(2);
+
+  std::stringstream graphData;
+  ASSERT_TRUE(optimizer->save(graphData, g2o::OptimizableGraph::AllLevels));
+
+  // every edge is written, whatever its level
+  EXPECT_THAT(parseLines(graphData.str(), "EDGE_SE2"), SizeIs(numVertices));
+  // the file keeps the zero default, so only the other levels are recorded
+  EXPECT_THAT(parseLines(graphData.str(), "DEFAULT_LEVEL"), IsEmpty());
+  EXPECT_THAT(parseLines(graphData.str(), "LEVEL"), ElementsAre("1", "2"));
+}
+
+TEST_F(IoGraphAttributes, SaveOneLevelDropsTheOthers) {
+  edge(1, 2)->setLevel(1);
+
+  std::stringstream graphData;
+  ASSERT_TRUE(optimizer->save(graphData, 1));
+
+  EXPECT_THAT(parseLines(graphData.str(), "EDGE_SE2"), SizeIs(1));
+  EXPECT_THAT(parseLines(graphData.str(), "DEFAULT_LEVEL"), ElementsAre("1"));
+}
+
+TEST_F(IoGraphAttributes, LoadAllLevels) {
+  edge(1, 2)->setLevel(1);
+  edge(2, 0)->setLevel(2);
+
+  std::stringstream graphData;
+  ASSERT_TRUE(optimizer->save(graphData, g2o::OptimizableGraph::AllLevels));
+  optimizer->clear();
+  ASSERT_TRUE(optimizer->load(graphData));
+
+  ASSERT_THAT(optimizer->edges(), SizeIs(numVertices));
+  EXPECT_THAT(edge(0, 1)->level(), Eq(0));
+  EXPECT_THAT(edge(1, 2)->level(), Eq(1));
+  EXPECT_THAT(edge(2, 0)->level(), Eq(2));
+}
+
+TEST_F(IoGraphAttributes, LoadDefaultLevel) {
+  optimizer->clear();
+
+  std::stringstream graphData("DEFAULT_LEVEL 2\n" + std::string(kLegacyGraph));
+  ASSERT_TRUE(optimizer->load(graphData));
+
+  ASSERT_THAT(optimizer->edges(), SizeIs(1));
+  EXPECT_THAT(edge(0, 1)->level(), Eq(2));
+}
+
+TEST_F(IoGraphAttributes, EdgeLevelOverridesDefaultLevel) {
+  optimizer->clear();
+
+  std::stringstream graphData(
+      "DEFAULT_LEVEL 2\n"
+      "VERTEX_SE2 0 0 0 0\n"
+      "VERTEX_SE2 1 1 0 0\n"
+      "VERTEX_SE2 2 2 0 0\n"
+      "EDGE_SE2 0 1 1 0 0 1 0 0 1 0 1\n"
+      "EDGE_SE2 1 2 1 0 0 1 0 0 1 0 1\n"
+      "LEVEL 5\n");
+  ASSERT_TRUE(optimizer->load(graphData));
+
+  ASSERT_THAT(optimizer->edges(), SizeIs(2));
+  EXPECT_THAT(edge(0, 1)->level(), Eq(2));  // takes the file default
+  EXPECT_THAT(edge(1, 2)->level(), Eq(5));  // states its own
 }
 
 TEST_F(IoGraphAttributes, LoadRobustKernel) {
