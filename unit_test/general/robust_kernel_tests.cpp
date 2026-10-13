@@ -145,6 +145,30 @@ TYPED_TEST_P(RobustKernelTests, SecondDerivative) {
   }
 }
 
+TEST(General, RobustKernelDCSScalesInformationBySquaredScale) {
+  // DCS (Agarwal et al. 2013) scales the information by s^2, s = min(1,
+  // 2 phi / (phi + e2)); rho is the integral of that scaling.
+  g2o::RobustKernelDCS kernel;
+  const double phi = 0.7;
+  kernel.setDelta(phi);
+  double previous = -1;
+  for (double e2 = 0.01; e2 < 100; e2 *= 1.1) {
+    g2o::Vector3 rho;
+    kernel.robustify(e2, rho);
+    const double s = std::min(1., 2 * phi / (phi + e2));
+    EXPECT_THAT(rho[1], DoubleNear(s * s, 1e-12)) << "e2 = " << e2;
+    EXPECT_THAT(rho[0], Ge(previous)) << "rho decreases at e2 = " << e2;
+    EXPECT_THAT(rho[0], Le(3 * phi));
+    previous = rho[0];
+  }
+  // continuous across the threshold e2 = phi
+  g2o::Vector3 below, above;
+  kernel.robustify(phi * (1 - 1e-9), below);
+  kernel.robustify(phi * (1 + 1e-9), above);
+  EXPECT_THAT(above[0], DoubleNear(below[0], 1e-6));
+  EXPECT_THAT(above[1], DoubleNear(below[1], 1e-6));
+}
+
 // clang-format off
 REGISTER_TYPED_TEST_SUITE_P(RobustKernelTests, Values, Derivative, SecondDerivative);
 using RobustKernelTypes = ::testing::Types<

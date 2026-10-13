@@ -160,10 +160,15 @@ void RobustKernelDCS::robustify(double e2, Vector3& rho) const {
     rho[1] = 1.;
     rho[2] = 0;
   } else {
-    double phi_sqr = phi * phi;
-    rho[0] = scale * e2 * scale;
-    rho[1] = (4 * phi_sqr * (phi - e2)) / std::pow(phi + e2, 3);
-    rho[2] = -(8 * phi_sqr * (2 * phi - e2)) / std::pow(phi + e2, 4);
+    // DCS scales the information by scale^2, so that is rho'.  rho is its
+    // integral (continuous with e2 at e2 = phi, bounded by 3 phi), which
+    // keeps rho, rho' and rho'' consistent without changing the weights.
+    // Differentiating scale^2 * e2 instead gives rho' < 0 for e2 > phi,
+    // i.e. a negative information that repels the edge.
+    const double phi_sqr = phi * phi;
+    rho[0] = 3 * phi - 4 * phi_sqr / (phi + e2);
+    rho[1] = scale * scale;
+    rho[2] = -(8 * phi_sqr) / std::pow(phi + e2, 3);
   }
 }
 

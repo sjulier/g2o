@@ -185,7 +185,10 @@ class G2O_CORE_API RobustKernelSaturated : public RobustKernel {
  *
  * See paper Robust Map Optimization from Agarwal et al.  ICRA 2013
  *
- * delta is used as $phi$
+ * delta is used as $phi$.  With s = min(1, 2 phi / (phi + e2)) the edge's
+ * information is scaled by s^2, so rho'(e2) = s^2 and
+ * rho(e2) = e2 for e2 <= phi, 3 phi - 4 phi^2 / (phi + e2) beyond: the
+ * integral of the scaling, which is non-decreasing and bounded by 3 phi.
  */
 class G2O_CORE_API RobustKernelDCS : public RobustKernel {
  public:
